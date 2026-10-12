@@ -1,0 +1,39 @@
+# Entornos virtuales de Python
+.venv/
+venv/
+env/
+ENV/
+
+# Bytecode y caches de Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Empaquetado y cobertura
+build/
+dist/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+
+# Variables de entorno y configuracion local
+.env
+.env.*
+!.env.example
+
+# Salidas generadas por el scraper
+/data/
+*.log
+
+# Archivos locales del editor y del sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~

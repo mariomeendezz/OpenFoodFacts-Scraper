@@ -1,6 +1,6 @@
 MIT License
 
-Copyright 2026 Mario Méndez
+Copyright 2026 Mario Méndez and Adrián Moreno
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

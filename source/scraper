@@ -1,0 +1,168 @@
+from pathlib import Path
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import pandas as pd
+
+# python .\source\scraper
+# mariomendez2003@gmail.com
+# Ze3_kdN#4nXygzJ
+
+# Definir campos y atributos finales del dataset
+fields = [
+    "quantity",
+    "packaging",
+    "brands",
+    "categories",
+    "labels",
+    "countries"
+]
+attributes = [
+    "code",
+    "product_name",
+    "nutri_score",
+    "nova_group",
+    "green_score"
+] + fields
+
+
+def extract_product(driver, url, data):
+
+    driver.get(url)
+
+    # Sacar el code directamente de la url
+    code = driver.current_url.split("/product/")[1].split("/")[0]
+    data["code"] = code
+
+    # Esperar a obtener el HTML (pausa hasta que encuentra el nombre)
+    WebDriverWait(driver, 20).until(
+        EC.presence_of_element_located(
+            (By.CSS_SELECTOR, 'h2[itemprop="name"]')
+        )
+    )
+
+    # Obtener todos los atributos de fields
+    for field in fields:
+        # <p id="field_quantity">
+        #     <span class="field">Quantity: </span>
+        #     <span class="field_value" id="field_quantity_value">1 kg</span>
+        # </p>
+
+        elements = driver.find_elements(
+            By.ID, f"field_{field}_value"
+        )
+
+        if elements:
+            data[field] = elements[0].text.strip()
+
+
+    # Obtener el nombre
+
+    # <h2 class="title-1" property="food:name" itemprop="name">
+    #     Fromage Blanc Nature - Milky Food Professional - 1 kg
+    # </h2>   
+
+    name = driver.find_elements(
+        By.CSS_SELECTOR, 'h2[itemprop="name"]'
+    )
+
+    data["product_name"] = name[0].text.strip()
+
+    # Obtener "nutri_score", "nova_group" y "green_score"
+
+    # <h4 class="grade_c_title attr_title">Nutri-Score C</h4>
+
+    # <h4 class="grade_e_title attr_title">Ultra-processed foods</h4>
+    # <span>1 ultra-processing marker</span>
+
+    # <h4 class="grade_b_title attr_title">Green-Score B</h4>
+
+    cards = driver.find_elements(
+        By.CSS_SELECTOR, ".attribute_card"
+    )
+
+    for card in cards:
+        titles = card.find_elements(By.CSS_SELECTOR, "h4.attr_title")
+
+        if not titles:
+            continue
+
+        title = titles[0].text.strip()
+
+        if title.startswith("Nutri-Score"):
+            data["nutri_score"] = title
+
+        elif "processing marker" in card.text.lower():
+            data["nova_group"] = title
+
+        elif title.startswith("Green-Score"):
+            data["green_score"] = title
+
+
+    return data
+
+
+# Inicializar el driver y hacer solicitud GET con la url
+url = "https://world.openfoodfacts.org"
+driver = webdriver.Chrome()
+driver.get(url)
+
+# Iniciar sesion por que sino hay limite de peticiones
+input("Inicia sesión en Chrome. Depués, ve a la página a partir de la cual quieres generar el dataset.")
+
+# Numero de paginas a recorrer
+n_pages = 2  
+
+dataset = []
+
+for page in range(n_pages):
+
+    # Esperar a que aparezcan los links
+    links = WebDriverWait(driver, 20).until(
+        EC.presence_of_all_elements_located(
+            (By.CSS_SELECTOR, "a.list_product_a")
+        )
+    )
+
+    # <a href="https://world.openfoodfacts.org/product/6111246721261/fromage-blanc-nature-milky-food-professional" class="list_product_a" 
+    # title="Fromage Blanc Nature – Milky Food Professional – 1&nbsp;kg"> ...
+    # </div></div></a>   
+
+    # Extraer todas las URLs
+    urls = [link.get_attribute("href") for link in links]
+
+    # <a href="/2" rel="next$nofollow">Next</a>
+
+    # Boton de siguiente pagina
+    next_button = driver.find_elements(
+        By.CSS_SELECTOR, 'a[rel^="next"]'
+    )
+    next_url = next_button[0].get_attribute("href") if next_button else None
+
+    # Recorrer todas las URLs (productos)
+    for i, product_url in enumerate(urls):
+        # Inicializar diccionario vacio para cada producto
+        data = {attribute: None for attribute in attributes}
+
+        # Extraer los atributos y guardarlos
+        extract_product(driver, product_url, data)
+        dataset.append(data)
+
+        print(f"Página {page + 1}, Producto {i + 1}: {product_url}")
+    
+    if next_url is None:
+        break
+
+    # Siguiente página
+    driver.get(next_url)
+
+# Guardar dataset
+output_path = Path(__file__).resolve().parent.parent / "data" / "dataset.csv"
+output_path.parent.mkdir(exist_ok=True)
+df = pd.DataFrame(dataset, columns=attributes)
+df.to_csv(output_path, index=False)
+
+print(f"Dataset guardado: {len(df)} productos en {output_path}")
+
+driver.quit()
