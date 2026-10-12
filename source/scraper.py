@@ -1,9 +1,13 @@
+import requests
 from pathlib import Path
+
+import pandas as pd
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import pandas as pd
+
 
 # python .\source\scraper
 # mariomendez2003@gmail.com
@@ -24,7 +28,7 @@ attributes = [
     "nutri_score",
     "nova_group",
     "green_score"
-] + fields
+] + fields + ["img_url"]
 
 
 def extract_product(driver, url, data):
@@ -93,12 +97,20 @@ def extract_product(driver, url, data):
         if title.startswith("Nutri-Score"):
             data["nutri_score"] = title
 
-        elif "processing marker" in card.text.lower():
+        elif "processed" in card.text.lower():
             data["nova_group"] = title
 
         elif title.startswith("Green-Score"):
             data["green_score"] = title
 
+    # <img style="border-radius:10px;margin-bottom:0.5rem;" id="og_image" class="product_image" src="https://images.openfoodfacts.org/images/products/848/000/016/8832/front_es.217.400.jpg"
+    #  width="261" height="400" alt="Crema de cacahuetes 100% - Product - es" itemprop="thumbnail" loading="lazy">
+
+    image = driver.find_elements(
+        By.ID, "og_image"
+    )
+    if image:
+        data["image_url"] = image[0].get_attribute("src")
 
     return data
 
@@ -107,6 +119,18 @@ def extract_product(driver, url, data):
 url = "https://world.openfoodfacts.org"
 driver = webdriver.Chrome()
 driver.get(url)
+
+robots = requests.get(
+    url + "/robots.txt",
+    headers={"User-Agent": "Local learning project)"},
+    timeout=20,
+)
+
+robots.raise_for_status()
+
+output_path = Path(__file__).resolve().parent.parent / "robots.txt"
+output_path.write_text(robots.text)
+
 
 # Iniciar sesion por que sino hay limite de peticiones
 input("Inicia sesión en Chrome. Depués, ve a la página a partir de la cual quieres generar el dataset.")
