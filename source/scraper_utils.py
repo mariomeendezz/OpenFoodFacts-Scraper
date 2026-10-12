@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pandas as pd
 import requests
-from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -61,6 +60,40 @@ def login_with_requests(email, password):
         print("Advertencia: No se pudo verificar la sesión. Revisa las credenciales.")
         
     return session
+
+
+def save_robots_txt(session, base_url):
+    """
+    Descarga y guarda el archivo robots.txt del sitio web.
+    """
+    robots_url = f"{base_url}/robots.txt"
+    response = session.get(
+        robots_url,
+        headers={"User-Agent": "Local learning project)"},
+        timeout=20,
+    )
+    response.raise_for_status()
+
+    output_path = Path(__file__).resolve().parent.parent / "robots.txt"
+    output_path.write_text(response.text)
+    print(f"Archivo robots.txt guardado en: {output_path}")
+
+
+def inject_cookies_to_selenium(driver, session, base_url):
+    """
+    Inyecta las cookies de la sesión autenticada de requests en el navegador Selenium.
+    """
+    driver.get(base_url)  # Cargar el dominio para establecer cookies
+
+    for cookie in session.cookies:
+        driver.add_cookie({
+            "name": cookie.name,
+            "value": cookie.value,
+            "domain": cookie.domain,
+            "path": cookie.path
+        })
+    
+    print("Cookies inyectadas en Selenium.")
 
 
 def extract_product(driver, url, data):
@@ -149,48 +182,10 @@ def extract_product(driver, url, data):
     return data
 
 
-# Inicializar el driver y hacer solicitud GET con la url
-url = "https://world.openfoodfacts.org"
-driver = webdriver.Chrome()
-driver.get(url)
-
-# Iniciar sesion por que sino hay limite de peticiones
-session = login_with_requests("mariomendez2003@gmail.com", "Ze3_kdN#4nXygzJ")
-
-############# Extracción de robots.txt con la sesion autenticada
-robots = session.get(
-    url + "/robots.txt",
-    headers={"User-Agent": "Local learning project)"},
-    timeout=20,
-)
-robots.raise_for_status()
-# Guardamos robots.txt en la carpeta raíz del proyecto
-output_path = Path(__file__).resolve().parent.parent / "robots.txt"
-output_path.write_text(robots.text)
-#############
-
-############# link Selenium y la sesion loggeada
-# Para añadir cookies en Selenium cargamos el dominio en el navegador
-driver.get(url)
-# Inyectmos las cookies autenticadas de la sesión de requests
-for cookie in session.cookies:
-    driver.add_cookie({
-        "name": cookie.name,
-        "value": cookie.value,
-        "domain": cookie.domain,
-        "path": cookie.path
-    })
-driver.get(url)
-#############
-
-
-# Numero de paginas a recorrer
-n_pages = 2  
-
-dataset = []
-
-for page in range(n_pages):
-
+def get_page_product_urls(driver):
+    """
+    Obtiene las URLs de los productos en la página actual y la URL de la siguiente página.
+    """
     # Esperar a que aparezcan los links
     links = WebDriverWait(driver, 20).until(
         EC.presence_of_all_elements_located(
@@ -198,14 +193,8 @@ for page in range(n_pages):
         )
     )
 
-    # <a href="https://world.openfoodfacts.org/product/6111246721261/fromage-blanc-nature-milky-food-professional" class="list_product_a" 
-    # title="Fromage Blanc Nature – Milky Food Professional – 1&nbsp;kg"> ...
-    # </div></div></a>   
-
     # Extraer todas las URLs
     urls = [link.get_attribute("href") for link in links]
-
-    # <a href="/2" rel="next$nofollow">Next</a>
 
     # Boton de siguiente pagina
     next_button = driver.find_elements(
@@ -213,32 +202,17 @@ for page in range(n_pages):
     )
     next_url = next_button[0].get_attribute("href") if next_button else None
 
-    # Recorrer todas las URLs (productos)
-    for i, product_url in enumerate(urls):
-        # Inicializar diccionario vacio para cada producto
-        data = {attribute: None for attribute in ATTRIBUTES}
-
-        # Extraer los atributos y guardarlos
-        extract_product(driver, product_url, data)
-        dataset.append(data)
-
-        print(f"Página {page + 1}, Producto {i + 1}: {product_url}")
-    
-    if next_url is None:
-        break
-
-    # Siguiente página
-    driver.get(next_url)
+    return urls, next_url
 
 
-############# Guardar dataset final en CSV
-output_path = Path(__file__).resolve().parent.parent / "data" / "dataset.csv"
-output_path.parent.mkdir(exist_ok=True)
-df = pd.DataFrame(dataset, columns=ATTRIBUTES)
-df.to_csv(output_path, index=False)
+def save_dataset_to_csv(dataset):
+    """
+    Guarda el dataset final en un archivo CSV.
+    """
+    output_path = Path(__file__).resolve().parent.parent / "data" / "dataset.csv"
+    output_path.parent.mkdir(exist_ok=True)
+    df = pd.DataFrame(dataset, columns=ATTRIBUTES)
+    df.to_csv(output_path, index=False)
 
-print(f"Dataset guardado: {len(df)} productos en {output_path}")
-#############
+    print(f"Dataset guardado: {len(df)} productos en {output_path}")
 
-
-driver.quit()
