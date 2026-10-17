@@ -1,8 +1,10 @@
+import argparse
 from pathlib import Path
 
 import pandas as pd
 import requests
 from selenium.webdriver.common.by import By
+from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -24,7 +26,47 @@ ATTRIBUTES = [
 ] + FIELDS + ["image_url"]
 
 
-def login_with_requests(email, password):
+def parse_arguments() -> argparse.Namespace:
+    """
+    Parsea los argumentos de línea de comandos.
+    """
+    parser = argparse.ArgumentParser(description="Extrae productos de OpenFoodFacts.")
+
+    parser.add_argument(
+        "--url",
+        type=str,
+        default="https://world.openfoodfacts.org",
+        help="URL del listado de OpenFoodFacts que se va a extraer (por ejemplo, una categoría).",
+    )
+
+    parser.add_argument(
+        "--n-pages",
+        type=int,
+        default=2,
+        help="Número de páginas que se van a recorrer.",
+    )
+
+    parser.add_argument(
+        "--gmail",
+        type=str,
+        required=True,
+        help="Correo electrónico para iniciar sesión en OpenFoodFacts.",
+    )
+
+    parser.add_argument(
+        "--password",
+        type=str,
+        required=True,
+        help="Contraseña para iniciar sesión en OpenFoodFacts.",
+    )
+
+    return parser.parse_args()
+
+
+def login_with_requests(
+    email: str,
+    password: str,
+) -> requests.Session:
     """
     Realiza el login en OpenFoodFacts con requests y retorna una sesión autenticada.
     """
@@ -53,16 +95,29 @@ def login_with_requests(email, password):
     response = session.post(login_url, data=payload, timeout=20)
     response.raise_for_status()
     
-    # 4. Verificación de autenticación, asigna la cookie 'user_id'
-    if "user_id" in session.cookies or "session" in response.text.lower():
-        print("Sesión iniciada correctamente.")
-    else:
-        print("Advertencia: No se pudo verificar la sesión. Revisa las credenciales.")
-        
+    # 4. Comprobar que se ha recibido una cookie de sesión.
+    authenticated = any(
+        cookie.name == "session"
+        and bool(cookie.value)
+        and not cookie.is_expired()
+        for cookie in session.cookies
+    )
+
+    if not authenticated:
+        session.close()
+        raise RuntimeError(
+            "No se pudo confirmar el inicio de sesión. "
+            "Revisa las credenciales."
+        )
+
+    print("Sesión iniciada correctamente.")
     return session
 
 
-def save_robots_txt(session, base_url):
+def save_robots_txt(
+    session: requests.Session,
+    base_url: str,
+) -> None:
     """
     Descarga y guarda el archivo robots.txt del sitio web.
     """
@@ -79,7 +134,11 @@ def save_robots_txt(session, base_url):
     print(f"Archivo robots.txt guardado en: {output_path}")
 
 
-def inject_cookies_to_selenium(driver, session, base_url):
+def inject_cookies_to_selenium(
+    driver: WebDriver,
+    session: requests.Session,
+    base_url: str,
+) -> None:
     """
     Inyecta las cookies de la sesión autenticada de requests en el navegador Selenium.
     """
@@ -96,7 +155,11 @@ def inject_cookies_to_selenium(driver, session, base_url):
     print("Cookies inyectadas en Selenium.")
 
 
-def extract_product(driver, url, data):
+def extract_product(
+    driver: WebDriver,
+    url: str,
+    data: dict[str, str | None],
+) -> dict[str, str | None]:
     """
     Realiza la extracción de datos de un producto en OpenFoodFacts.
     """
@@ -115,10 +178,14 @@ def extract_product(driver, url, data):
 
     # Obtener todos los atributos de fields
     for field in FIELDS:
+        # ----------------------------------------------
+        # EJEMPLO DE HTML:
+        # ----------------------------------------------
         # <p id="field_quantity">
         #     <span class="field">Quantity: </span>
         #     <span class="field_value" id="field_quantity_value">1 kg</span>
         # </p>
+        # ----------------------------------------------
 
         elements = driver.find_elements(
             By.ID, f"field_{field}_value"
@@ -130,9 +197,13 @@ def extract_product(driver, url, data):
 
     # Obtener el nombre
 
+    # ----------------------------------------------
+    # EJEMPLO DE HTML:
+    # ----------------------------------------------
     # <h2 class="title-1" property="food:name" itemprop="name">
     #     Fromage Blanc Nature - Milky Food Professional - 1 kg
     # </h2>   
+    # ----------------------------------------------
 
     name = driver.find_elements(
         By.CSS_SELECTOR, 'h2[itemprop="name"]'
@@ -140,14 +211,20 @@ def extract_product(driver, url, data):
 
     data["product_name"] = name[0].text.strip()
 
+    
+
     # Obtener "nutri_score", "nova_group" y "green_score"
 
+    # ----------------------------------------------
+    # EJEMPLO DE HTML:
+    # ----------------------------------------------
     # <h4 class="grade_c_title attr_title">Nutri-Score C</h4>
 
     # <h4 class="grade_e_title attr_title">Ultra-processed foods</h4>
     # <span>1 ultra-processing marker</span>
 
     # <h4 class="grade_b_title attr_title">Green-Score B</h4>
+    # ----------------------------------------------
 
     cards = driver.find_elements(
         By.CSS_SELECTOR, ".attribute_card"
@@ -170,8 +247,15 @@ def extract_product(driver, url, data):
         elif title.startswith("Green-Score"):
             data["green_score"] = title
 
-    # <img style="border-radius:10px;margin-bottom:0.5rem;" id="og_image" class="product_image" src="https://images.openfoodfacts.org/images/products/848/000/016/8832/front_es.217.400.jpg"
+    # Obtener url de la imagen
+
+    # ----------------------------------------------
+    # EJEMPLO DE HTML:
+    # ----------------------------------------------
+    # <img style="border-radius:10px;margin-bottom:0.5rem;" id="og_image" 
+    #  class="product_image" src="https://images.openfoodfacts.org/images/products/848/000/016/8832/front_es.217.400.jpg"
     #  width="261" height="400" alt="Crema de cacahuetes 100% - Product - es" itemprop="thumbnail" loading="lazy">
+    # ----------------------------------------------
 
     image = driver.find_elements(
         By.ID, "og_image"
@@ -182,7 +266,7 @@ def extract_product(driver, url, data):
     return data
 
 
-def get_page_product_urls(driver):
+def get_page_product_urls(driver: WebDriver) -> tuple[list[str | None], str | None]:
     """
     Obtiene las URLs de los productos en la página actual y la URL de la siguiente página.
     """
@@ -205,11 +289,11 @@ def get_page_product_urls(driver):
     return urls, next_url
 
 
-def save_dataset_to_csv(dataset):
+def save_dataset_to_csv(dataset: list[dict[str, str | None]]) -> None:
     """
     Guarda el dataset final en un archivo CSV.
     """
-    output_path = Path(__file__).resolve().parent.parent / "data" / "dataset.csv"
+    output_path = Path(__file__).resolve().parent.parent / "dataset" / "dataset.csv"
     output_path.parent.mkdir(exist_ok=True)
     df = pd.DataFrame(dataset, columns=ATTRIBUTES)
     df.to_csv(output_path, index=False)

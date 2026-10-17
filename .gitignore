@@ -24,10 +24,6 @@ htmlcov/
 .env.*
 !.env.example
 
-# Salidas generadas por el scraper
-/data/
-*.log
-
 # Archivos locales del editor y del sistema
 .vscode/
 .idea/
